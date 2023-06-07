@@ -35,8 +35,8 @@ def lambda_handler(event, context):
    
    # we get the latest approved model from pipeline model package
     latest_approved_model = sagemaker_dev.list_model_packages(
-                                    ModelApprovalStatus='Approved',
-                                    ModelPackageGroupName='AbaloneModelPackageGroupName',
+                                    ModelApprovalStatus=event['ModelApprovalStatus'],
+                                    ModelPackageGroupName=event['package_group_name'],
                                     SortBy='CreationTime',
                                     SortOrder='Descending'
                                 )
