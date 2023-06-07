@@ -2,7 +2,7 @@
 Pipeline proof of concept
 
 ## Dev Account
-In Dev account, we have a pipeline that does Processing, Training and Evaluation. We also have a Lambda Function that wil lbe triggered once the model gets approved by MLC personnel.
+In Dev account, we have a pipeline that does Processing, Training and Evaluation. We also have a Lambda Function that will be triggered once the model gets approved by MLC personnel.
 The Lambda Function does the following:
   1. get the model_data_uri
   2. copy mdoel artifact from DEV s3 to PROD s3
