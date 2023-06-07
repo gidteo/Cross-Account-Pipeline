@@ -14,23 +14,40 @@ def lambda_handler(event, context):
     ####################
     # get the model_data_uri
     sagemaker_dev = boto3.client("sagemaker")
-    pipeline_arn = sagemaker_dev.list_pipeline_executions(
-        PipelineName=event["PipelineName"])
-    pipeline_arn = pipeline_arn["PipelineExecutionSummaries"][0]["PipelineExecutionArn"]
-    
-    response = sagemaker_dev.list_pipeline_execution_steps(
-        PipelineExecutionArn=pipeline_arn,
-        SortOrder='Ascending')
-        
-    training_arn = response["PipelineExecutionSteps"][int(event["TrainingEventSequence"])]["Metadata"]["TrainingJob"]["Arn"]    
-    training_job_name = training_arn.rsplit('/', 1)[-1]
-
-    model_data_uri = sagemaker_dev.describe_training_job(
-    TrainingJobName=training_job_name
-            )
-
-    model_data_uri = model_data_uri["ModelArtifacts"]["S3ModelArtifacts"]
    
+    ## instead of getting them from pipeline, we get it from pipeline model package (see below)
+    # pipeline_arn = sagemaker_dev.list_pipeline_executions(
+    #     PipelineName=event["PipelineName"])
+    # pipeline_arn = pipeline_arn["PipelineExecutionSummaries"][0]["PipelineExecutionArn"]
+    
+    # response = sagemaker_dev.list_pipeline_execution_steps(
+    #     PipelineExecutionArn=pipeline_arn,
+    #     SortOrder='Ascending')
+        
+    # training_arn = response["PipelineExecutionSteps"][int(event["TrainingEventSequence"])]["Metadata"]["TrainingJob"]["Arn"]    
+    # training_job_name = training_arn.rsplit('/', 1)[-1]
+
+    # model_data_uri = sagemaker_dev.describe_training_job(
+    # TrainingJobName=training_job_name
+    #         )
+
+    # model_data_uri = model_data_uri["ModelArtifacts"]["S3ModelArtifacts"]
+   
+   # we get the latest approved model from pipeline model package
+    latest_approved_model = sagemaker_dev.list_model_packages(
+                                    ModelApprovalStatus='Approved',
+                                    ModelPackageGroupName='AbaloneModelPackageGroupName',
+                                    SortBy='CreationTime',
+                                    SortOrder='Descending'
+                                )
+
+    latest_approved_model = latest_approved_model["ModelPackageSummaryList"][0]["ModelPackageArn"]
+    
+    model_data_uri = sagemaker_dev.describe_model_package(
+                                ModelPackageName=latest_approved_model
+                            )
+
+    model_data_uri = model_data_uri["InferenceSpecification"]["Containers"][0]["ModelDataUrl"]
 
     ####################
     # copy model artifact over to prod
