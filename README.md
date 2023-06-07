@@ -5,7 +5,7 @@ Pipeline proof of concept
 In Dev account, we have a pipeline that does Processing, Training and Evaluation. We also have a Lambda Function that will be triggered once the model gets approved by MLC personnel.
 The Lambda Function does the following:
   1. get the model_data_uri
-  2. copy mdoel artifact from DEV s3 to PROD s3
+  2. copy model artifact from DEV s3 to PROD s3
   3. then, we assume PROD execution role
   4. create model package group name in PROD
   5. create model package in PROD
