@@ -1,4 +1,4 @@
-# MLC_Pipeline_PoC
+# Cross account pipeline
 Pipeline proof of concept
 
 ## Dev Account
