@@ -1,6 +1,7 @@
 import json
 import boto3
 import botocore
+import os
 
 
 ssm = boto3.client('ssm')
@@ -10,33 +11,15 @@ def lambda_handler(event, context):
     """ """
     print(event)
     print(context)
-    
+    event = event['detail']
     ####################
     # get the model_data_uri
     sagemaker_dev = boto3.client("sagemaker")
    
-    ## instead of getting them from pipeline, we get it from pipeline model package (see below)
-    # pipeline_arn = sagemaker_dev.list_pipeline_executions(
-    #     PipelineName=event["PipelineName"])
-    # pipeline_arn = pipeline_arn["PipelineExecutionSummaries"][0]["PipelineExecutionArn"]
-    
-    # response = sagemaker_dev.list_pipeline_execution_steps(
-    #     PipelineExecutionArn=pipeline_arn,
-    #     SortOrder='Ascending')
-        
-    # training_arn = response["PipelineExecutionSteps"][int(event["TrainingEventSequence"])]["Metadata"]["TrainingJob"]["Arn"]    
-    # training_job_name = training_arn.rsplit('/', 1)[-1]
-
-    # model_data_uri = sagemaker_dev.describe_training_job(
-    # TrainingJobName=training_job_name
-    #         )
-
-    # model_data_uri = model_data_uri["ModelArtifacts"]["S3ModelArtifacts"]
-   
    # we get the latest approved model from pipeline model package
     latest_approved_model = sagemaker_dev.list_model_packages(
                                     ModelApprovalStatus=event['ModelApprovalStatus'],
-                                    ModelPackageGroupName=event['package_group_name'],
+                                    ModelPackageGroupName=event['ModelPackageGroupName'],
                                     SortBy='CreationTime',
                                     SortOrder='Descending'
                                 )
@@ -56,7 +39,7 @@ def lambda_handler(event, context):
     
     s3 = boto3.client("s3")
     copy_source = {'Bucket': DevBucketName, 'Key': DevKey}
-    s3.copy_object(CopySource = copy_source, Bucket = event["ProdBucketName"], Key = event["ProdKey"]+'model.tar.gz')
+    s3.copy_object(CopySource = copy_source, Bucket = os.environ["ProdBucketName"], Key = os.environ["ProdKey"]+'model.tar.gz')
     # add KMS to encrypt model in PROD 
     # KMS sits in PROD and will need to give DEV account permission to use that key to encrypt
 
@@ -64,7 +47,7 @@ def lambda_handler(event, context):
     # assume PROD 
     sts_connection = boto3.client('sts')
     acct_b = sts_connection.assume_role(
-        RoleArn=event["ProdExecRole"], ## This is PROD account role (this account)
+        RoleArn=os.environ["ProdExecRole"], ## This is PROD account role (this account)
         RoleSessionName="cross_acct_lambda"
     )
     
@@ -87,7 +70,7 @@ def lambda_handler(event, context):
     except botocore.exceptions.ClientError as error:
         if error.response['Error']['Code'] == 'ValidationException' and ('does not exist' in error.response['Error']["Message"]):
             sagemaker_prod.create_model_package_group(
-            ModelPackageGroupName=ModelPackage_GroupName,
+            ModelPackageGroupName=event["ModelPackageGroupName"],
         )
         else:
             raise error
@@ -97,76 +80,76 @@ def lambda_handler(event, context):
     
     ####################    
     # create model package in PROD
-    sagemaker_prod.create_model_package(
+    res = sagemaker_prod.create_model_package(
         ModelPackageGroupName=event["ModelPackageGroupName"],
         InferenceSpecification={
                 'Containers': [
                     {
-                        'ContainerHostname': event["ContainerHostname"],
-                        'Image': event["Image"],
-                        'ModelDataUrl': event["model_data_uri"],
+                        'Image': event['InferenceSpecification']['Containers'][0].get("Image", "683313688378.dkr.ecr.us-east-1.amazonaws.com/sagemaker-xgboost:1.0-1-cpu-py3"),
+                        'ModelDataUrl': event['InferenceSpecification']['Containers'][0].get("ModelDataUrl", None),
                         'Environment': {},
                     },
                 ],
-                'SupportedTransformInstanceTypes': [
-                    event["SupportedTransformInstanceTypes"]
-                ],
-                'SupportedContentTypes': [
-                    event["CSV_type"],
-                ],
-                'SupportedResponseMIMETypes': [
-                    event["CSV_type"],
-                ]
+                'SupportedTransformInstanceTypes':event['InferenceSpecification']["SupportedTransformInstanceTypes"],
+                'SupportedContentTypes':event['InferenceSpecification']["SupportedContentTypes"],
+                'SupportedResponseMIMETypes': event['InferenceSpecification']["SupportedResponseMIMETypes"],
             },
+            # InferenceSpecification=event['InferenceSpecification'],
             CertifyForMarketplace=False,
             ModelApprovalStatus='Approved',
             ModelMetrics={
                 'ModelQuality': {
                     'Statistics': {
-                        'ContentType': event["JSON_application"],
-                        'S3Uri': event["EvaluationPath"]+'evaluation.json'
+                        'ContentType': event['ModelMetrics']['ModelQuality']["Statistics"]["ContentType"],
+                        'S3Uri': event['ModelMetrics']["ModelQuality"]["Statistics"]["S3Uri"]
                     },
                 },
                 'Bias': {},
                 'Explainability': {}
             },
+            # ModelMetrics=event['ModelMetrics']
         )
 
     ####################
     # create model in PROD
     try:
-        res = sagemaker_prod.create_model(
-            ModelName=event["model_name"],
-            PrimaryContainer={
-                'Image': event["Image"],
-                'ModelDataUrl': event["model_data_uri"],
-                'Environment': {},
-            },
-            ExecutionRoleArn=event["ProdExecRole"],
-            EnableNetworkIsolation=False
-        )
+        # res = sagemaker_prod.create_model(
+        #     ModelName=os.environ["ModelName"],
+        #     PrimaryContainer={
+        #         'Image': event["Image"],
+        #         'ModelDataUrl': event["ModelDataUrl"],
+        #         'Environment': {},
+        #     },
+        #     ExecutionRoleArn=event["ProdExecRole"],
+        #     EnableNetworkIsolation=False
+        # )
+        response = sagemaker_prod.create_model(
+        ModelName=event['ModelPackageGroupName'].split('/')[0],
+        Containers = [
+            {"ModelPackageName": res['ModelPackageArn'] }
+                ],
+        ExecutionRoleArn=os.environ["ProdExecRole"],
+        EnableNetworkIsolation=False),
         
     except botocore.exceptions.ClientError as error:
         if error.response['Error']['Code'] == 'ValidationException' and ('Cannot create already existing model' in error.response['Error']["Message"]):
             # delete model
             sagemaker_prod.delete_model(
-              ModelName=event["model_name"]
+              ModelName=event['ModelPackageGroupName'].split('/')[0],
                 )
             # create model again
             sagemaker_prod.create_model(
-            ModelName=event["model_name"],
-            PrimaryContainer={
-                'Image': event["Image"],
-                'ModelDataUrl': event["model_data_uri"],
-                'Environment': {},
-            },
-            ExecutionRoleArn=event["ProdExecRole"],
-            EnableNetworkIsolation=False
-        )
+            ModelName=event['ModelPackageGroupName'].split('/')[0],
+        Containers = [
+            {"ModelPackageName": res['ModelPackageArn'] }
+                ],
+        ExecutionRoleArn=os.environ["ProdExecRole"],
+        EnableNetworkIsolation=False
+        ),
         else:
             raise error
         
-    except Exceptions as e:
+    except Exception as e:
         raise e
     
     ####################
@@ -174,7 +157,7 @@ def lambda_handler(event, context):
     ssm = new_session.client("ssm")
     ssm.put_parameter(
             Name = 'model_name',
-            Value= event["model_name"],
+            Value= event["ModelPackageGroupName"].split('/')[0],
             Type='String',
             Overwrite=True
     )
